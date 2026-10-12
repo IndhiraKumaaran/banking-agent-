@@ -1,0 +1,1 @@
+"""Application package for the banking support agent project."""
