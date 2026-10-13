@@ -43,16 +43,31 @@ The account lookup uses fictional in-memory records and treats the authenticated
 With the virtual environment activated, run:
 
 ```bash
-python -m pytest
+python -m pytest -v
 ```
 
 ## Start the API in GitHub Codespaces
 
-With the dependencies installed and the virtual environment activated, start the API from the project folder:
+With the dependencies installed and the virtual environment activated, first check whether the API is already running:
+
+```bash
+curl http://localhost:8000/health
+```
+
+If this returns `{"status":"ok"}`, reuse the existing server; do not start a second Uvicorn process on port 8000. If you need to restart a server in a terminal you control, stop it with **Ctrl+C** there, then start it again from the project folder:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+If the original terminal is unavailable, identify the listener before taking action:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+ps -fp <PID>
+```
+
+Only if the process is the Uvicorn server you intend to restart, request a graceful stop with `kill -TERM <PID>`. Do not stop an unfamiliar process. Then run the Uvicorn command above.
 
 In Codespaces, open the **Ports** tab in the bottom panel. If port `8000` is not listed, choose **Forward a Port** and enter `8000`. Open the forwarded address for port 8000, then add `/docs` to that address to use the interactive API documentation. Forwarded ports are private by default; keep that setting unless you specifically need otherwise.
 

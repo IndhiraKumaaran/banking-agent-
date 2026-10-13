@@ -16,7 +16,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app import tools as banking_tools
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 SYSTEM_PROMPT = """You are the single assistant for a fictional banking support demo.
@@ -241,12 +241,13 @@ def create_banking_agent(
 ) -> tuple[Any, list[BaseTool]]:
 	"""Build one LangChain agent; accept an injected chat model for offline tests."""
 	if model is None:
-		api_key = os.getenv("GOOGLE_API_KEY")
-		if not api_key:
+		load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
+		api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+		if not api_key or api_key == "your-google-api-key-here":
 			raise AgentConfigurationError(
 				"The agent is not configured. Set GOOGLE_API_KEY to enable chat."
 			)
-		model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+		model_name = os.getenv("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
 		try:
 			model = ChatGoogleGenerativeAI(
 				model=model_name,

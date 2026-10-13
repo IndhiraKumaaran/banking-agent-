@@ -309,12 +309,27 @@ def test_conversation_is_bound_to_authenticated_customer():
 		)
 
 
-def test_missing_google_key_has_a_clear_configuration_error(monkeypatch):
+def test_missing_google_key_has_a_clear_configuration_error(monkeypatch, tmp_path):
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	monkeypatch.setattr(agent_module, "PROJECT_ROOT", project_root)
+	monkeypatch.chdir(tmp_path)
 	monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+	monkeypatch.delenv("GEMINI_MODEL", raising=False)
 	conversation = AgentConversation("test-chat", "CUST1001")
 
 	with pytest.raises(AgentConfigurationError, match="Set GOOGLE_API_KEY"):
 		create_banking_agent("CUST1001", conversation)
+
+
+def test_example_google_key_placeholder_is_not_accepted(monkeypatch, tmp_path):
+	project_root = tmp_path / "project"
+	project_root.mkdir()
+	monkeypatch.setattr(agent_module, "PROJECT_ROOT", project_root)
+	monkeypatch.setenv("GOOGLE_API_KEY", "your-google-api-key-here")
+
+	with pytest.raises(AgentConfigurationError, match="Set GOOGLE_API_KEY"):
+		create_banking_agent("CUST1001", AgentConversation("test-chat", "CUST1001"))
 
 
 def test_gemini_model_uses_configured_key_and_model_without_logging_key(monkeypatch):
@@ -340,9 +355,65 @@ def test_gemini_model_uses_configured_key_and_model_without_logging_key(monkeypa
 	assert len(tools) == 5
 
 
-def test_dotenv_loader_targets_project_root_file():
-	assert agent_module.load_dotenv.__module__ == "dotenv.main"
-	assert (agent_module.Path(agent_module.__file__).resolve().parents[1] / ".env").name == ".env"
+def test_project_root_dotenv_loads_before_model_configuration(monkeypatch, tmp_path):
+	project_root = tmp_path / "project"
+	working_directory = tmp_path / "working"
+	project_root.mkdir()
+	working_directory.mkdir()
+	(project_root / ".env").write_text("GOOGLE_API_KEY=project-test-key\n")
+	(working_directory / ".env").write_text("GOOGLE_API_KEY=working-test-key\n")
+	monkeypatch.setattr(agent_module, "PROJECT_ROOT", project_root)
+	monkeypatch.chdir(working_directory)
+	monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+	monkeypatch.delenv("GEMINI_MODEL", raising=False)
+
+	configured = {}
+
+	class FakeGeminiModel:
+		def __init__(self, **kwargs):
+			configured.update(kwargs)
+
+	monkeypatch.setattr(agent_module, "ChatGoogleGenerativeAI", FakeGeminiModel)
+	monkeypatch.setattr(agent_module, "create_agent", lambda **kwargs: kwargs)
+
+	create_banking_agent("CUST1001", AgentConversation("test-chat", "CUST1001"))
+
+	assert configured == {
+		"model": "gemini-2.5-flash",
+		"google_api_key": "project-test-key",
+		"temperature": 0,
+	}
+
+
+def test_project_root_dotenv_configures_gemini_model(monkeypatch, tmp_path):
+	project_root = tmp_path / "project"
+	working_directory = tmp_path / "working"
+	project_root.mkdir()
+	working_directory.mkdir()
+	(project_root / ".env").write_text(
+		"GOOGLE_API_KEY=project-test-key\nGEMINI_MODEL=gemini-test-model\n"
+	)
+	monkeypatch.setattr(agent_module, "PROJECT_ROOT", project_root)
+	monkeypatch.chdir(working_directory)
+	monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+	monkeypatch.delenv("GEMINI_MODEL", raising=False)
+
+	configured = {}
+
+	class FakeGeminiModel:
+		def __init__(self, **kwargs):
+			configured.update(kwargs)
+
+	monkeypatch.setattr(agent_module, "ChatGoogleGenerativeAI", FakeGeminiModel)
+	monkeypatch.setattr(agent_module, "create_agent", lambda **kwargs: kwargs)
+
+	create_banking_agent("CUST1001", AgentConversation("test-chat", "CUST1001"))
+
+	assert configured == {
+		"model": "gemini-test-model",
+		"google_api_key": "project-test-key",
+		"temperature": 0,
+	}
 
 
 def test_model_failure_is_sanitized_and_does_not_expose_provider_error(monkeypatch):
