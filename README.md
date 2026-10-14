@@ -1,18 +1,30 @@
 # Smart Banking Support Agent Using Agentic AI
 
-This project is an incremental educational demo for common banking-support workflows. It includes an EMI calculator, an illustrative eligibility checker, fictional mock account data, a FastAPI interface, and one LangChain tool-calling agent. It does not connect to a real bank.
+This repository is an educational demo for a small banking-support workflow. It combines an EMI calculator, an illustrative affordability checker, fictional mock account data, a FastAPI service, and a single LangChain tool-calling agent. It does not connect to a real bank or persist data beyond the in-memory demo state.
 
-## Planned Development
+## Architecture overview
 
-1. Set up the project structure and development dependencies.
-2. Add the EMI calculator, eligibility checker, and mock account lookup.
-3. Expose the support tools through FastAPI endpoints.
-4. Integrate the banking tools into one LangChain agent.
-5. Expand and run tests for the project behavior.
+The project is intentionally small and deterministic:
 
-## Install in GitHub Codespaces
+- `app/tools.py` contains the production-style demo logic for EMI calculation, affordability checks, mock account access, and loan-application confirmation.
+- `app/agent.py` builds a single LangChain agent with five tools. The agent enforces a fixed order of operations and uses exact confirmation logic in Python rather than relying on model prompts alone.
+- `app/main.py` exposes the demo through FastAPI endpoints and converts Python errors into HTTP responses.
+- `app/mock_data.py` contains the in-memory customer records and application state used by the mock banking workflow.
+- `tests/` verifies the business rules, API behavior, and the agent's verification steps.
 
-Open a terminal in your Codespace, then run these commands from the project folder:
+The design is meant to demonstrate agent orchestration and guardrails, not a production banking stack.
+
+## Setup and environment
+
+### Prerequisites
+
+- Python 3.11+ recommended
+- A virtual environment
+- Optional: a Google Gemini API key for the `/agent/chat` endpoint
+
+### Install dependencies
+
+From the project root:
 
 ```bash
 python -m venv .venv
@@ -21,111 +33,378 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-The non-agent tools and their tests do not require an LLM API key. The `/agent/chat` endpoint uses Google Gemini and requires `GOOGLE_API_KEY`.
+### Configure Gemini access
 
-## Configure the Agent
+The non-agent logic and tests do not require an LLM API key. The `/agent/chat` route uses Google Gemini and expects `GOOGLE_API_KEY` in the project-root `.env` file or in the environment.
 
-Copy `.env.example` to `.env` and add your Gemini API key, or configure `GOOGLE_API_KEY` as a Codespaces secret. The application loads the project-root `.env` file automatically. Do not commit a real key; `.env` is ignored by Git. The example file contains placeholders only.
+The application loads `.env` from the project root automatically before creating the model. `GEMINI_MODEL` is optional; if unset, the code defaults to `gemini-2.5-flash`.
+
+The repository includes an `.env.example` template for local setup. Do not commit a real key or paste secret material into the README.
+
+Example pattern:
 
 ```bash
 cp .env.example .env
-# Edit .env to set GOOGLE_API_KEY to your Gemini API key.
+# Edit .env and set GOOGLE_API_KEY to a local placeholder or development value.
 ```
 
-`GEMINI_MODEL` is optional; the default is `gemini-2.5-flash`, a Gemini model with LangChain tool-calling support. Set it to another currently available tool-capable Gemini model if you prefer. For automated tests, the agent uses a scripted fake model and does not make provider calls.
+If `GOOGLE_API_KEY` is missing or still set to the example placeholder value, the agent returns a clear configuration error instead of attempting a provider call.
 
-## Authentication and Mock Data
+## Authentication and mock data model
 
-The account lookup uses fictional in-memory records and treats the authenticated customer ID as a simulated identity supplied by a trusted caller. This mock check is for training only. Real banking systems require proper identity verification, secure sessions or tokens, and server-side authorization.
+The product uses fictional in-memory records only:
 
-## Run the Tests
+- `customer_id` values such as `CUST1001`, `CUST1002`, and `CUST1003` are demo identities.
+- A request is considered authenticated only when the caller supplies the matching `X-Authenticated-Customer-ID` header.
+- Account lookup is bound to that customer identity and forbids access to another customer record.
+- Returned account numbers are masked as `XXXX####` and do not expose full account numbers, passwords, PINs, OTPs, CVVs, or other sensitive values.
+- The app stores application state in memory only; restarting the process clears it.
 
-With the virtual environment activated, run:
+This is explicitly a learning simulation. It is not a secure authentication system and not a production bank implementation.
 
-```bash
-python -m pytest -v
-```
+## Run the API locally
 
-## Start the API in GitHub Codespaces
-
-With the dependencies installed and the virtual environment activated, first check whether the API is already running:
-
-```bash
-curl http://localhost:8000/health
-```
-
-If this returns `{"status":"ok"}`, reuse the existing server; do not start a second Uvicorn process on port 8000. If you need to restart a server in a terminal you control, stop it with **Ctrl+C** there, then start it again from the project folder:
+From the project root, start the FastAPI app:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-If the original terminal is unavailable, identify the listener before taking action:
+Check that the service is alive:
 
 ```bash
-lsof -nP -iTCP:8000 -sTCP:LISTEN
-ps -fp <PID>
+curl http://localhost:8000/health
 ```
 
-Only if the process is the Uvicorn server you intend to restart, request a graceful stop with `kill -TERM <PID>`. Do not stop an unfamiliar process. Then run the Uvicorn command above.
+Expected response:
 
-In Codespaces, open the **Ports** tab in the bottom panel. If port `8000` is not listed, choose **Forward a Port** and enter `8000`. Open the forwarded address for port 8000, then add `/docs` to that address to use the interactive API documentation. Forwarded ports are private by default; keep that setting unless you specifically need otherwise.
+```json
+{"status":"ok"}
+```
 
-## Chat with the Agent
+Open the interactive API docs at `/docs` once the app is running.
 
-The agent endpoint requires the demo identity header. The header is supplied by the API caller in this training project; it is not secure production authentication. The agent uses this identity for account lookup and binds each in-memory conversation to that customer. Live Gemini requests are not required for tests and have not been verified as part of this project test run.
+## API reference
 
-Start with a normal loan request. The agent calculates EMI, checks eligibility, and if eligible returns the exact details plus a `conversation_id` and confirmation token. For an ineligible request, it explains the result and does not ask for confirmation.
+### `GET /health`
+
+Health check for the service.
+
+Example:
 
 ```bash
-curl -X POST http://localhost:8000/agent/chat \
-	-H "X-Authenticated-Customer-ID: CUST1001" \
-	-H "Content-Type: application/json" \
-	-d '{"message":"I want a personal loan of Rs. 100000 at 12% for 12 months. My monthly salary is Rs. 60000 and my existing monthly EMI is Rs. 0."}'
+curl http://localhost:8000/health
 ```
 
-After reviewing the exact returned summary, confirm in the same conversation with the exact phrase shown by the agent:
+Response:
 
-```bash
-curl -X POST http://localhost:8000/agent/chat \
-	-H "X-Authenticated-Customer-ID: CUST1001" \
-	-H "Content-Type: application/json" \
-	-d '{"conversation_id":"YOUR_CONVERSATION_ID","message":"I confirm the loan application details exactly as shown."}'
+```json
+{"status":"ok"}
 ```
 
-The agent accepts no vague confirmation such as `yes`; the confirmation handler and existing submission tool enforce this in Python rather than relying on the prompt. Conversation state and applications are in memory and are lost when the process restarts.
+### `GET /accounts/{customer_id}`
 
-### Sample Requests
+Returns masked mock account data for the authenticated customer.
 
-Retrieve the fictional account for `CUST1001` by supplying the simulated authenticated customer ID:
+Required header:
+
+```http
+X-Authenticated-Customer-ID: CUST1001
+```
+
+Example:
 
 ```bash
 curl -H "X-Authenticated-Customer-ID: CUST1001" \
-	http://localhost:8000/accounts/CUST1001
+  http://localhost:8000/accounts/CUST1001
 ```
 
-Check illustrative loan eligibility:
+Example response:
 
-```bash
-curl -X POST http://localhost:8000/loan/eligibility \
-	-H "Content-Type: application/json" \
-	-d '{"monthly_salary": 60000, "existing_monthly_emi": 5000, "proposed_monthly_emi": 20000, "max_emi_ratio": 0.5}'
+```json
+{
+  "customer_id": "CUST1001",
+  "customer_name": "Mira Example",
+  "account_number": "XXXX1234",
+  "account_type": "Savings",
+  "balance": 84520.75
+}
 ```
 
-### Submit a Mock Loan Application
+Behavior:
 
-Send the application details with `confirmed` omitted or `false` to receive a summary and confirmation token. Review those exact details, then send the same request with `confirmed: true` and the returned `confirmation_token`. If any details change, the token no longer matches and the API returns a refreshed summary requiring confirmation again. These mock confirmation tokens are held in memory and are not a production authentication or security mechanism.
+- Missing auth header -> `401`
+- Different authenticated customer than requested customer -> `403`
+- Unknown customer ID -> `404`
+
+### `POST /loan/eligibility`
+
+Evaluates a simplified EMI affordability check for a loan request.
+
+Request body:
+
+```json
+{
+  "monthly_salary": 60000,
+  "existing_monthly_emi": 5000,
+  "proposed_monthly_emi": 20000,
+  "max_emi_ratio": 0.5
+}
+```
+
+Response example:
+
+```json
+{
+  "eligible": true,
+  "monthly_salary": 60000.0,
+  "existing_monthly_emi": 5000.0,
+  "proposed_monthly_emi": 20000.0,
+  "total_monthly_emi": 25000.0,
+  "maximum_permitted_emi": 30000.0,
+  "existing_emi_ratio": 0.0833,
+  "total_emi_ratio": 0.4167,
+  "reason": "Total monthly EMI is within the illustrative permitted EMI limit."
+}
+```
+
+Validation rules:
+
+- `monthly_salary` must be a finite number greater than zero
+- `existing_monthly_emi` must be zero or greater
+- `proposed_monthly_emi` must be zero or greater
+- `max_emi_ratio` must be greater than zero and no greater than one
+- invalid values return an HTTP `422` with a validation error payload
+
+### `POST /loan/applications`
+
+Prepares or submits a mock loan application. This endpoint uses deterministic Python validation and confirmation logic.
+
+Request body pattern:
+
+```json
+{
+  "customer_id": "CUST1001",
+  "loan_amount": 100000,
+  "tenure_months": 12,
+  "annual_interest_rate": 0,
+  "monthly_salary": 60000,
+  "existing_monthly_emi": 0,
+  "proposed_monthly_emi": 8333.33,
+  "confirmed": false,
+  "confirmation_token": null
+}
+```
+
+Behavior by state:
+
+- If the application is not yet confirmed, it returns `202` with `status: "confirmation_required"` and a `confirmation_token`.
+- If the request is invalid, it returns `422`.
+- If the application is ineligible, it returns `422` with `status: "ineligible"`.
+- If a valid, confirmed request matches the summary, it returns `201` with `status: "submitted"`.
+- If the same confirmed payload is resent, it returns the existing mock application instead of creating a duplicate entry.
+
+Example first step (not yet confirmed):
 
 ```bash
 curl -X POST http://localhost:8000/loan/applications \
-	-H "Content-Type: application/json" \
-	-d '{"customer_id":"CUST1001","loan_amount":100000,"tenure_months":12,"annual_interest_rate":0,"monthly_salary":60000,"existing_monthly_emi":0,"proposed_monthly_emi":8333.33}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "customer_id":"CUST1001",
+    "loan_amount":100000,
+    "tenure_months":12,
+    "annual_interest_rate":0,
+    "monthly_salary":60000,
+    "existing_monthly_emi":0,
+    "proposed_monthly_emi":8333.33
+  }'
 ```
 
-Only eligible, explicitly confirmed applications are added to an in-memory mock store. Repeating an already confirmed request returns the existing mock application instead of creating another record. This educational flow is not production banking software and does not submit an application to a real bank.
+Example response shape:
 
-The account header is only a training simulation, not secure authentication. Real banking systems require proper identity verification, secure sessions or tokens, and server-side authorization.
+```json
+{
+  "status": "confirmation_required",
+  "message": "Review the application summary, then confirm these same details using the returned confirmation token.",
+  "application_summary": {
+    "customer_id": "CUST1001",
+    "loan_amount": 100000.0,
+    "tenure_months": 12,
+    "annual_interest_rate": 0.0,
+    "monthly_emi": 8333.33,
+    "monthly_salary": 60000.0,
+    "existing_monthly_emi": 0.0,
+    "proposed_monthly_emi": 8333.33,
+    "max_emi_ratio": 0.5,
+    "total_monthly_emi": 8333.33,
+    "eligible": true
+  },
+  "confirmation_token": "REDACTED_TOKEN"
+}
+```
+
+When the summary is confirmed, the client must send the same values together with the returned token:
+
+```json
+{
+  "customer_id": "CUST1001",
+  "loan_amount": 100000,
+  "tenure_months": 12,
+  "annual_interest_rate": 0,
+  "monthly_salary": 60000,
+  "existing_monthly_emi": 0,
+  "proposed_monthly_emi": 8333.33,
+  "confirmed": true,
+  "confirmation_token": "REDACTED_TOKEN"
+}
+```
+
+If any detail changes, the confirmation token no longer matches and the API returns a new confirmation-required response.
+
+### `POST /agent/chat`
+
+Runs a single guarded LangChain agent turn for an authenticated customer.
+
+Required header:
+
+```http
+X-Authenticated-Customer-ID: CUST1001
+```
+
+Request body:
+
+```json
+{
+  "message": "I want a personal loan of Rs. 100000 at 12% for 12 months. My monthly salary is Rs. 60000 and my existing monthly EMI is Rs. 0.",
+  "conversation_id": "optional-existing-conversation-id"
+}
+```
+
+The agent enforces the following flow:
+
+1. It uses the customer identity provided by the HTTP header.
+2. It binds each conversation to a single authenticated customer.
+3. It calls `calculate_emi` before checking affordability.
+4. It calls `check_loan_eligibility` only with the exact EMI just calculated.
+5. It prepares the loan application summary and, if eligible, asks for an exact confirmation phrase.
+6. It only submits an application after the user replies with the exact phrase `I confirm the loan application details exactly as shown.`
+7. It rejects vague replies such as `yes`.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/agent/chat \
+  -H "X-Authenticated-Customer-ID: CUST1001" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"I want a personal loan of Rs. 100000 at 12% for 12 months. My monthly salary is Rs. 60000 and my existing monthly EMI is Rs. 0."}'
+```
+
+The response includes a `conversation_id` for follow-up turns. To confirm the pending application, send the same `conversation_id` and the exact confirmation text in a second request.
+
+Example confirmation request:
+
+```bash
+curl -X POST http://localhost:8000/agent/chat \
+  -H "X-Authenticated-Customer-ID: CUST1001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "conversation_id":"DEMO_CONVERSATION_ID",
+    "message":"I confirm the loan application details exactly as shown."
+  }'
+```
+
+If the model is misconfigured or the provider fails, the API returns sanitized errors. Missing `GOOGLE_API_KEY` returns HTTP `503` with a clear configuration message; provider failures return `502` with a generic provider error.
+
+## EMI and eligibility rules
+
+The demo uses a standard amortized EMI formula:
+
+- If the annual interest rate is zero, the EMI is simply `loan_amount / tenure_months`.
+- Otherwise, the monthly rate is `annual_interest_rate / 12 / 100` and the EMI is calculated as:
+
+```text
+monthly_emi = P * r * (1 + r)^n / ((1 + r)^n - 1)
+```
+
+Where:
+
+- `P` = principal loan amount
+- `r` = monthly interest rate
+- `n` = number of monthly installments
+
+The tool returns these rounded values:
+
+- `monthly_emi`
+- `total_repayment`
+- `total_interest`
+
+The affordability rule is intentionally simple:
+
+```text
+maximum_permitted_emi = monthly_salary * max_emi_ratio
+
+total_monthly_emi = existing_monthly_emi + proposed_monthly_emi
+
+eligible = total_monthly_emi <= maximum_permitted_emi
+```
+
+The default `max_emi_ratio` is `0.50`.
+
+The reason strings returned by the tool are:
+
+- `"Existing EMI obligations already exceed the illustrative permitted EMI limit, even before adding the proposed loan."`
+- `"Total monthly EMI is within the illustrative permitted EMI limit."`
+- `"Total monthly EMI exceeds the illustrative permitted EMI limit."`
+
+## Confirmation and submission safeguards
+
+The mock application flow is designed to prevent accidental confirmation.
+
+- The application summary is serialized as a canonical JSON payload and hashed.
+- The backend generates a `confirmation_token` that binds to the exact summary values.
+- If the user changes any detail, the token no longer matches and a new summary is generated.
+- The exact confirmation phrase is enforced in Python and is not delegated to the LLM prompt alone.
+- Vague confirmations such as `yes` do not submit anything.
+- Only eligible applications are allowed into the in-memory store.
+- The mock application store is in memory only and resets when the process restarts.
+
+This is intentionally a demonstration of guardrails, not a production identity or authorization system.
+
+## Test instructions
+
+Run the project tests from the repo root:
+
+```bash
+python -m pytest -v
+```
+
+The repository was verified locally with the following result:
+
+```text
+77 passed
+```
 
 ## Limitations
 
-This prototype uses fictional data, an in-memory store, and a simulated identity header. LLM output can be incorrect, so deterministic Python functions enforce EMI calculations, eligibility, account authorization, and application confirmation. It has no durable storage, real bank connection, production authentication, or regulatory/compliance status; it is not production banking software.
+This project intentionally has several limitations:
+
+- It uses fictional, in-memory data only.
+- It does not connect to a real bank or financial back end.
+- It does not use persistent databases or durable sessions.
+- It does not implement real user authentication, session management, or authorization.
+- It does not provide compliance, regulatory, or fraud controls.
+- It relies on a deterministic Python check for loan logic and confirmation, while the LLM is used to orchestrate the workflow.
+
+This demo is for educational use, learning, and experimentation with agentic workflows, not production banking software.
+
+## Summary
+
+This project demonstrates a compact agentic workflow in which a language model calls deterministic tools to:
+
+- calculate an EMI,
+- evaluate affordability,
+- fetch masked customer account information,
+- prepare a mock application summary,
+- and require explicit confirmation before a mock submission is stored.
+
+The README focuses on the actual, verified behavior in the repository rather than making claims beyond the code and tests.
